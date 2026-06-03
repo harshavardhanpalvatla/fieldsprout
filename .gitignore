@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+
+# Expo / React Native
+apps/mobile/dist/
+apps/mobile/.expo/
+apps/mobile/ios/
+apps/mobile/android/
+
+# API build
+apps/api/dist/
+apps/api/tsconfig.tsbuildinfo
+
+# Environment files (never commit secrets)
+.env
+.env.local
+apps/api/.env
+apps/web/.env.local
+
+# Prisma generated
+apps/api/prisma/migrations/
+
+# Logs
+*.log
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Package manager
+.npm

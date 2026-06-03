@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  rep
+  warehouse_mgr
+  admin
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum DistributorStatus {
+  active
+  pending
+  inactive
+}
+
+enum OrderStatus {
+  draft
+  submitted
+  approved
+  rejected
+  dispatched
+  delivered
+}
+
+enum StockMovementType {
+  in
+  out
+  reserve
+  release
+  adjust
+}
+
+enum DuesSource {
+  manual
+  tally_sync
+}
+
+enum NotifRecipient {
+  rep
+  distributor
+  both
+}
+
+model User {
+  id                 String     @id @default(uuid())
+  phone              String     @unique
+  name               String
+  role               Role
+  employeeId         String?    @map("employee_id")
+  territory          String?
+  state              String?
+  reportingManagerId String?    @map("reporting_manager_id")
+  photoUrl           String?    @map("photo_url")
+  status             UserStatus @default(active)
+  fcmToken           String?    @map("fcm_token")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+  deletedAt          DateTime?  @map("deleted_at")
+
+  warehouseAssignments UserWarehouseAssignment[]
+  ordersAsRep          Order[]                   @relation("rep")
+  visits               Visit[]
+  attendance           Attendance[]
+  gpsLocations         GpsLocation[]
+
+  @@map("users")
+}
+
+model Warehouse {
+  id        String    @id @default(uuid())
+  name      String
+  address   String?
+  state     String?
+  lat       Decimal?  @db.Decimal(10, 7)
+  lng       Decimal?  @db.Decimal(10, 7)
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  assignments UserWarehouseAssignment[]
+  orders      Order[]
+  stock       Stock[]
+
+  @@map("warehouses")
+}
+
+model UserWarehouseAssignment {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  warehouseId String   @map("warehouse_id")
+  assignedAt  DateTime @default(now()) @map("assigned_at")
+  assignedBy  String   @map("assigned_by")
+  isActive    Boolean  @default(true) @map("is_active")
+
+  user      User      @relation(fields: [userId], references: [id])
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
+
+  @@unique([userId, warehouseId])
+  @@map("user_warehouse_assignments")
+}
+
+model Distributor {
+  id             String            @id @default(uuid())
+  name           String
+  phone          String?
+  address        String?
+  state          String?
+  lat            Decimal           @db.Decimal(10, 7)
+  lng            Decimal           @db.Decimal(10, 7)
+  geofenceRadius Int               @default(200) @map("geofence_radius")
+  assignedRepId  String?           @map("assigned_rep_id")
+  status         DistributorStatus @default(active)
+  addedBy        String            @map("added_by")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  deletedAt      DateTime?         @map("deleted_at")
+
+  orders Order[]
+  visits Visit[]
+  dues   Dues[]
+
+  @@map("distributors")
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  name        String
+  category    String?
+  description String?
+  imageUrl    String?   @map("image_url")
+  regions     String[]
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  variants ProductVariant[]
+
+  @@map("products")
+}
+
+model ProductVariant {
+  id                 String    @id @default(uuid())
+  productId          String    @map("product_id")
+  sku                String    @unique
+  unit               String
+  price              Decimal   @db.Decimal(10, 2)
+  priceEffectiveFrom DateTime? @map("price_effective_from")
+  isActive           Boolean   @default(true) @map("is_active")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  product    Product         @relation(fields: [productId], references: [id])
+  stock      Stock[]
+  orderItems OrderItem[]
+  movements  StockMovement[]
+
+  @@map("product_variants")
+}
+
+model Stock {
+  id          String   @id @default(uuid())
+  variantId   String   @map("variant_id")
+  warehouseId String   @map("warehouse_id")
+  physicalQty Int      @default(0) @map("physical_qty")
+  reservedQty Int      @default(0) @map("reserved_qty")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedBy   String?  @map("updated_by")
+
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+
+  @@unique([variantId, warehouseId])
+  @@map("stock")
+}
+
+model StockMovement {
+  id          String            @id @default(uuid())
+  variantId   String            @map("variant_id")
+  warehouseId String            @map("warehouse_id")
+  type        StockMovementType
+  quantity    Int
+  orderId     String?           @map("order_id")
+  reason      String?
+  performedBy String            @map("performed_by")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@map("stock_movements")
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  repId           String      @map("rep_id")
+  distributorId   String      @map("distributor_id")
+  warehouseId     String      @map("warehouse_id")
+  status          OrderStatus @default(draft)
+  totalAmount     Decimal     @db.Decimal(12, 2) @default(0) @map("total_amount")
+  rejectionReason String?     @map("rejection_reason")
+  approvedBy      String?     @map("approved_by")
+  dispatchedBy    String?     @map("dispatched_by")
+  submittedAt     DateTime?   @map("submitted_at")
+  approvedAt      DateTime?   @map("approved_at")
+  dispatchedAt    DateTime?   @map("dispatched_at")
+  deliveredAt     DateTime?   @map("delivered_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  deletedAt       DateTime?   @map("deleted_at")
+
+  rep         User        @relation("rep", fields: [repId], references: [id])
+  distributor Distributor @relation(fields: [distributorId], references: [id])
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id])
+  items       OrderItem[]
+
+  @@index([status])
+  @@index([repId])
+  @@index([warehouseId, status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String   @map("order_id")
+  variantId String   @map("variant_id")
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(10, 2) @map("unit_price")
+  lineTotal Decimal  @db.Decimal(12, 2) @map("line_total")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order   Order          @relation(fields: [orderId], references: [id])
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@map("order_items")
+}
+
+model Attendance {
+  id         String    @id @default(uuid())
+  repId      String    @map("rep_id")
+  workDate   DateTime  @db.Date @map("work_date")
+  checkinAt  DateTime  @map("checkin_at")
+  checkoutAt DateTime? @map("checkout_at")
+  checkinLat Decimal   @db.Decimal(10, 7) @map("checkin_lat")
+  checkinLng Decimal   @db.Decimal(10, 7) @map("checkin_lng")
+
+  rep          User          @relation(fields: [repId], references: [id])
+  visits       Visit[]
+  gpsLocations GpsLocation[]
+
+  @@unique([repId, workDate])
+  @@map("attendance")
+}
+
+model Visit {
+  id            String    @id @default(uuid())
+  repId         String    @map("rep_id")
+  distributorId String    @map("distributor_id")
+  attendanceId  String    @map("attendance_id")
+  checkinLat    Decimal   @db.Decimal(10, 7) @map("checkin_lat")
+  checkinLng    Decimal   @db.Decimal(10, 7) @map("checkin_lng")
+  geoVerified   Boolean   @default(false) @map("geo_verified")
+  photoUrl      String?   @map("photo_url")
+  checkinAt     DateTime  @map("checkin_at")
+  checkoutAt    DateTime? @map("checkout_at")
+
+  rep         User        @relation(fields: [repId], references: [id])
+  distributor Distributor @relation(fields: [distributorId], references: [id])
+  attendance  Attendance  @relation(fields: [attendanceId], references: [id])
+
+  @@map("visits")
+}
+
+model GpsLocation {
+  id           String   @id @default(uuid())
+  repId        String   @map("rep_id")
+  attendanceId String   @map("attendance_id")
+  lat          Decimal  @db.Decimal(10, 7)
+  lng          Decimal  @db.Decimal(10, 7)
+  capturedAt   DateTime @map("captured_at")
+  syncedAt     DateTime @default(now()) @map("synced_at")
+
+  rep        User       @relation(fields: [repId], references: [id])
+  attendance Attendance @relation(fields: [attendanceId], references: [id])
+
+  @@index([repId, capturedAt])
+  @@map("gps_locations")
+}
+
+model Dues {
+  id            String     @id @default(uuid())
+  distributorId String     @map("distributor_id")
+  invoiceRef    String?    @map("invoice_ref")
+  amount        Decimal    @db.Decimal(12, 2)
+  dueDate       DateTime?  @db.Date @map("due_date")
+  source        DuesSource
+  updatedBy     String?    @map("updated_by")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  deletedAt     DateTime?  @map("deleted_at")
+
+  distributor Distributor @relation(fields: [distributorId], references: [id])
+
+  @@map("dues")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String
+  entity    String
+  entityId  String   @map("entity_id")
+  payload   Json?
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
+
+model NotificationConfig {
+  id              String         @id @default(uuid())
+  event           String         @unique
+  pushEnabled     Boolean        @default(true) @map("push_enabled")
+  whatsappEnabled Boolean        @default(true) @map("whatsapp_enabled")
+  smsEnabled      Boolean        @default(false) @map("sms_enabled")
+  recipient       NotifRecipient
+  updatedBy       String?        @map("updated_by")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@map("notification_config")
+}
